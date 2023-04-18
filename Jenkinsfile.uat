@@ -1,0 +1,40 @@
+pipeline {
+    agent any
+    stages {
+        stage('Checkout Pre-production Branch') {
+            steps {
+                git branch: "pre-production", credentialsId: 'git-creds', url: 'https://github.com/example/your-repo.git'
+            }
+        }
+        stage('Pull Docker Image') {
+            steps {
+                script {
+                    // get the latest Docker image from Nexus
+                    def latestVersion = nexusRepository(repository: 'your-docker-repo', version: '[0.0.1,)').sort().last()
+
+                    // pull the Docker image
+                    docker.withRegistry('https://your-docker-registry', 'docker-creds') {
+                        def image = docker.image("your-docker-repo:${latestVersion}")
+                        image.pull()
+                    }
+                }
+            }
+        }
+        stage('Run Cucumber Tests') {
+            steps {
+                sh 'cucumber tests'
+            }
+        }
+        stage('Merge Pre-production to Main with Pull Request Approval') {
+            steps {
+                script {
+                    git branch: "main", credentialsId: 'git-creds', url: 'https://github.com/example/your-repo.git'
+                    git merge 'pre-production'
+
+                    // create pull request
+                    sh 'gh pr create --title "Merge Pre-production to Main" --body "Please review and approve this PR." --base main --head pre-production'
+                }
+            }
+        }
+    }
+}
