@@ -1,0 +1,40 @@
+pipeline {
+    agent any
+    stages {
+        stage('Checkout Testing Branch') {
+            steps {
+                git branch: "testing", credentialsId: 'git-creds', url: 'https://github.com/example/your-repo.git'
+            }
+        }
+        stage('Download Artifact') {
+            steps {
+                script {
+                    // find the latest artifact from Nexus
+                    def latestVersion = nexusNpmRepository(repository: 'your-npm-repo', version: '[0.0.1,)').sort().last()
+
+                    // download the artifact
+                    def artifactUrl = "${env.NEXUS_URL}/repository/your-npm-repo/${latestVersion}"
+                    sh "npm install ${artifactUrl}"
+                }
+            }
+        }
+        stage('Run Selenium Tests') {
+            steps {
+                withEnv(['DISPLAY=:0']) {
+                    sh 'npm run selenium-tests'
+                }
+            }
+        }
+        stage('Merge Testing to QA with Pull Request Approval') {
+            steps {
+                script {
+                    git branch: "qa", credentialsId: 'git-creds', url: 'https://github.com/example/your-repo.git'
+                    git merge 'testing'
+
+                    // create pull request
+                    sh 'gh pr create --title "Merge Testing to QA" --body "Please review and approve this PR." --base qa --head testing'
+                }
+            }
+        }
+    }
+}
