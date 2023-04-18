@@ -1,0 +1,59 @@
+pipeline {
+    agent any
+    options {
+        skipDefaultCheckout()
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('Build') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQubeServer') {
+                    sh 'mvn sonar:sonar'
+                }
+            }
+        }
+        stage('Upload to Nexus Repository') {
+            steps {
+                nexusPublisher nexusInstanceId: 'nexus', nexusRepositoryId: 'maven-releases', packages: [[$class: 'MavenPackage', mavenAssetList: [[classifier: '', extension: 'jar', filePath: 'target/*.jar']], mavenCoordinate: [artifactId: 'your-artifact', groupId: 'com.example', packaging: 'jar', version: '1.0-SNAPSHOT']]]
+            }
+        }
+        stage('Build and Upload Docker Image') {
+            steps {
+                sh 'docker build -t my-docker-image .'
+                withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USERNAME', passwordVariable: 'NEXUS_PASSWORD')]) {
+                    sh "docker login -u $NEXUS_USERNAME -p $NEXUS_PASSWORD nexus.example.com:8082"
+                    sh "docker tag my-docker-image nexus.example.com:8082/my-docker-image"
+                    sh "docker push nexus.example.com:8082/my-docker-image"
+                }
+            }
+        }
+        stage('Deploy to Dev Environment') {
+            environment {
+                DOCKER_REGISTRY = 'nexus.example.com:8082'
+            }
+            steps {
+                sh 'kubectl apply -f dev-deployment.yml'
+            }
+        }
+        stage('Merge Dev to QA with Pull Request Approval') {
+            steps {
+                script {
+                    git branch: "qa", credentialsId: 'git-creds', url: 'https://github.com/example/your-repo.git'
+                    git merge 'dev'
+
+                    // create pull request
+                    sh 'gh pr create --title "Merge Dev to QA" --body "Please review and approve this PR." --base qa --head dev'
+                }
+            }
+        }
+    }
+}
